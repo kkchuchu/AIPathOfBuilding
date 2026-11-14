@@ -1271,6 +1271,9 @@ function buildMode:OnFrame(inputEvents)
 		self:RefreshStatList()
 		self.configTab.calcFunc, self.configTab.calcBase = self.calcsTab:GetMiscCalculator()
 	end
+	if liveBridge then
+		liveBridge:OnBuildFrame(self)
+	end
 	if main.showThousandsSeparators ~= self.lastShowThousandsSeparators then
 		self:RefreshStatList()
 	end

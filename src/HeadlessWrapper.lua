@@ -32,6 +32,9 @@ function require(name)
 end
 
 
+-- LiveBridge is for interactive use only; keep it out of tests and headless scripts
+LIVEBRIDGE_DISABLED = true
+
 dofile("Launch.lua")
 
 -- Prevents loading of ModCache

@@ -26,6 +26,8 @@ LoadModule("Modules/BuildSiteTools")
 
 -- Load as global so other modules can access the same instance
 ToastNotification = LoadModule("Modules/ToastNotification")
+-- File-based bridge for external tools (see docs/live-bridge.md)
+liveBridge = LoadModule("Modules/LiveBridge")
 
 --[[if launch.devMode then
 	for skillName, skill in pairs(data.enchantments.Helmet) do
@@ -395,6 +397,10 @@ function main:OnFrame()
 			self.modes[self.mode].viewMode = "TREE"
 		end
 		self.newModeChangeToTree = false
+	end
+
+	if liveBridge then
+		liveBridge:OnMainFrame()
 	end
 
 	self.viewPort = { x = 0, y = 0, width = self.screenW, height = self.screenH }

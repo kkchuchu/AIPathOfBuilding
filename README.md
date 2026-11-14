@@ -1,3 +1,30 @@
+# Path of Building + LiveBridge
+
+> **This is a fork of [Path of Building Community](https://github.com/PathOfBuildingCommunity/PathOfBuilding) that adds _LiveBridge_.** With LiveBridge, scripts and AI assistants can see and edit the build you have open in PoB.
+
+![LiveBridge demo: a script builds an Elementalist while PoB recalculates live](docs/live-bridge/demo.gif)
+
+<sub>[Full-quality video (MP4)](docs/live-bridge/demo.mp4)</sub>
+
+### What LiveBridge adds
+
+- **Live state export.** Whenever your build changes, PoB writes `build.xml`, `stats.json` (every calculated stat) and `summary.txt` to a folder.
+- **Remote control.** Drop a JSON command in that folder and PoB runs it. There are 36 commands: allocate passives and masteries, add items, gems and skill groups, set the level, class, ascendancy and Configuration options, import or export builds, and more.
+- **Previews without changes.** `whatIfNodes` and `whatIfItem` return before/after numbers for any stat and leave the build untouched.
+- **Watch it work.** Each command shows a toast inside PoB with the resulting DPS, life and EHP changes.
+- **No dependencies.** It works through files only, with no network ports. The Python client uses only the standard library.
+
+```bash
+python tools/pob_bridge.py whatIfNodes '{"add": ["Heart of Thunder"]}'
+# -> CombinedDPS 1,246 -> 2,652 (+112.8%)
+```
+
+**[Read the LiveBridge documentation →](docs/live-bridge.md)**
+
+LiveBridge is an unofficial community project. It is not affiliated with or endorsed by Grinding Gear Games or the Path of Building Community team. Everything below this line is the original Path of Building README.
+
+---
+
 # Path of Building Community
 ## Welcome to Path of Building, an offline build planner for Path of Exile!
 
