@@ -24,6 +24,19 @@ SOFTWARE.
 
 *******************************************************************************
 
+LiveBridge additions (src/Modules/LiveBridge.lua, tools/pob_bridge.py,
+tools/bridge_selftest.py, docs/live-bridge.md, docs/live-bridge/):
+
+*******************************************************************************
+
+Copyright (c) 2026 LiveBridge contributors
+
+Released under the same MIT License as Path of Building Community above.
+The demo video and GIF show Path of Building's user interface and Path of
+Exile game data, which remain the property of their respective owners.
+
+*******************************************************************************
+
 PUC-Rio Lua interpreter embedded in Update.exe:
 
 *******************************************************************************
