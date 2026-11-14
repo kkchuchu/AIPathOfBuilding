@@ -235,6 +235,10 @@ Path of Building is running with LiveBridge. The bridge folder is C:/pob-bridge.
 - Never call importBuild, newBuild, openBuild or resetTree unless I ask; they replace my build.
 ```
 
+Here is what that looks like: Claude Code on the right is asked to make a fragile build tankier and drives PoB on the left ([video, 38 s](live-bridge/claude-demo.mp4)):
+
+[![Claude Code driving Path of Building through LiveBridge](live-bridge/claude-demo-poster.jpg)](live-bridge/claude-demo.mp4)
+
 Then you can ask things like:
 
 - "What's my weakest defensive layer right now?" The assistant reads `stats.json`.
@@ -264,7 +268,8 @@ The Python client uses `POB_BRIDGE_DIR` too, or `--dir`.
 - Path of Exile 1 (Community fork) only.
 - Jewel sockets, cluster jewels, timeless jewel conversions and tattoos are not yet editable through commands. Their effects are still included in every stat.
 - Undo history: commands record undo states, so Ctrl+Z works per tab as usual. There is no single undo for a whole command sequence. Use `exportCode` before experimenting and `importBuild` to roll back.
-- One PoB instance per bridge folder.
+- One PoB instance per bridge folder. PoB itself only allows one instance at a time.
+- **Keep the PoB window in the foreground (not minimized or covered) while commands run.** When PoB is in the background, for example behind a fullscreen game, it pauses rendering and only processes commands occasionally, so requests can take minutes or time out. `stats.json` and `build.xml` still show the last state.
 
 ## Development
 
