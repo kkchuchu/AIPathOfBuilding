@@ -6,6 +6,14 @@
 
 <sub>[Full-quality video (MP4)](docs/live-bridge/demo.mp4)</sub>
 
+### Watch Claude use it
+
+A fresh Claude Code session is asked *"my build keeps dying, fix it"*. It reads the live stats, previews six defensive notables with `whatIfNodes`, applies them, and reports the result. On this demo character, life went up 45% and EHP almost doubled, with DPS unchanged.
+
+[![Claude Code driving Path of Building through LiveBridge](docs/live-bridge/claude-demo-poster.jpg)](docs/live-bridge/claude-demo.mp4)
+
+<sub>Click the image to watch the 38-second video (MP4).</sub>
+
 ### What LiveBridge adds
 
 - **Live state export.** Whenever your build changes, PoB writes `build.xml`, `stats.json` (every calculated stat) and `summary.txt` to a folder.
