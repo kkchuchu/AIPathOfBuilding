@@ -38,6 +38,9 @@ local KEY_STATS = {
 
 local MIN_EXPORT_INTERVAL = 300 -- ms between state exports
 local POLL_INTERVAL = 100       -- ms between command queue scans
+local BACKGROUND_FRAME_MS = 100      -- idle frame pacing while PoB is not the foreground window
+local BACKGROUND_DEEP_FRAME_MS = 250 -- after BACKGROUND_DEEP_AFTER ms without commands or focus
+local BACKGROUND_DEEP_AFTER = 3000
 
 local dirReady = false
 local lastExportBuild, lastExportRevision, lastExportView
@@ -1147,9 +1150,79 @@ local function buildIsSettled()
 	return true
 end
 
+---------------------------------------------------------------------------
+-- Background keep-alive
+--
+-- The SimpleGraphic runtime skips whole frames (OnFrame is never called) while the
+-- window is unfocused, the cursor is not over it, and no Lua coroutine is suspended.
+-- That would stall the command queue whenever PoB is behind another window.
+-- Keeping one suspended coroutine alive makes the runtime keep calling OnFrame;
+-- to avoid rendering at full speed in the background we then pace idle frames
+-- ourselves with Sleep() while PoB is not the foreground window.
+-- Set POB_BRIDGE_BACKGROUND=0 to turn this off.
+---------------------------------------------------------------------------
+
+local keepAlive -- strong reference: coroutine._list() only holds weak keys
+local winApi    -- ffi.C with the few Win32 calls we need, or false when unavailable
+local pidBuf
+
+local function initBackground()
+	if winApi ~= nil then return end
+	winApi = false
+	if os.getenv("POB_BRIDGE_BACKGROUND") == "0" then return end
+	local okFfi, ffi = pcall(require, "ffi")
+	if not okFfi or ffi.os ~= "Windows" then return end
+	pcall(ffi.cdef, [[
+		void Sleep(uint32_t ms);
+		void* GetForegroundWindow(void);
+		uint32_t GetWindowThreadProcessId(void* hwnd, uint32_t* pid);
+		uint32_t GetCurrentProcessId(void);
+	]])
+	local okProbe = pcall(function()
+		pidBuf = ffi.new("uint32_t[1]")
+		local _ = ffi.C.GetCurrentProcessId() + 0
+	end)
+	if not okProbe then return end
+	winApi = ffi.C
+	keepAlive = coroutine.create(function()
+		while true do coroutine.yield() end
+	end)
+	coroutine.resume(keepAlive)
+end
+
+local function isForeground()
+	local hwnd = winApi.GetForegroundWindow()
+	if hwnd == nil then return false end
+	pidBuf[0] = 0
+	winApi.GetWindowThreadProcessId(hwnd, pidBuf)
+	return pidBuf[0] == winApi.GetCurrentProcessId()
+end
+
+local idle = true -- no command pending and the last queue scan found nothing
+local lastActiveTime = 0 -- last time PoB was in the foreground or handled a command
+
+local function paceBackgroundFrame()
+	if not winApi then return end
+	local now = GetTime()
+	if pending or not idle or isForeground() then
+		lastActiveTime = now
+		return
+	end
+	winApi.Sleep(now - lastActiveTime > BACKGROUND_DEEP_AFTER and BACKGROUND_DEEP_FRAME_MS or BACKGROUND_FRAME_MS)
+end
+
 -- Called once per frame from main:OnFrame (after mode switches are applied)
 function bridge:OnMainFrame()
 	if not self.enabled then return end
+	local okBg, errBg = pcall(function()
+		initBackground()
+		paceBackgroundFrame()
+	end)
+	if not okBg then
+		winApi = false
+		keepAlive = nil
+		ConPrintf("LiveBridge background keep-alive disabled: %s", tostring(errBg))
+	end
 	local ok, err = pcall(function()
 		ensureDirs()
 		if pending then
@@ -1184,6 +1257,7 @@ function bridge:OnMainFrame()
 		lastPollTime = now
 		if not buildIsSettled() then return end
 		local cmd = readNextCommand()
+		idle = cmd == nil
 		if cmd then
 			runCommand(cmd)
 		end
@@ -1195,4 +1269,16 @@ function bridge:OnMainFrame()
 end
 
 bridge.commands = commands
+
+-- Create the keep-alive coroutine while PoB is still initialising: the runtime only
+-- guarantees 10 frames after boot, so when PoB starts behind another window waiting
+-- for the first OnMainFrame could leave the bridge stalled forever.
+if bridge.enabled then
+	local okBg, errBg = pcall(initBackground)
+	if not okBg then
+		winApi = false
+		ConPrintf("LiveBridge background keep-alive disabled: %s", tostring(errBg))
+	end
+end
+
 return bridge
