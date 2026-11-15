@@ -269,7 +269,7 @@ The Python client uses `POB_BRIDGE_DIR` too, or `--dir`.
 - Jewel sockets, cluster jewels, timeless jewel conversions and tattoos are not yet editable through commands. Their effects are still included in every stat.
 - Undo history: commands record undo states, so Ctrl+Z works per tab as usual. There is no single undo for a whole command sequence. Use `exportCode` before experimenting and `importBuild` to roll back.
 - One PoB instance per bridge folder. PoB itself only allows one instance at a time.
-- **Keep the PoB window in the foreground (not minimized or covered) while commands run.** When PoB is in the background, for example behind a fullscreen game, it pauses rendering and only processes commands occasionally, so requests can take minutes or time out. `stats.json` and `build.xml` still show the last state.
+- **Background use (Windows).** The PoB runtime normally skips frames while its window is unfocused, which would stall the command queue. The bridge keeps PoB processing commands in the background (covered, minimized, or behind a fullscreen game), including when PoB starts in the background. While idle in the background it limits itself to about 10 frames per second, and to 4 per second after 3 seconds without commands, so the first command after a quiet period can take up to about 0.5 s. Set `POB_BRIDGE_BACKGROUND=0` to turn this off and get the runtime's default behaviour back; then keep PoB in the foreground while commands run. On other platforms PoB must stay in the foreground.
 
 ## Development
 
