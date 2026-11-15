@@ -210,8 +210,8 @@ Slot names follow PoB: `Weapon 1`, `Weapon 2`, `Helmet`, `Body Armour`, `Gloves`
 
 | Command | Args | Notes |
 |---|---|---|
-| `listConfig` | `query?`, `changedOnly?` | Lists options with `var`, `label`, `type`, current `value` and, for drop-downs, the allowed `options`. |
-| `setConfig` | `var` + `value`, and/or `values: { var: value }`, and/or `unset: [var]` | Checkboxes take `true`/`false`, counts take numbers and lists take one of the `options`. `unset` restores the default. |
+| `listConfig` | `query?`, `changedOnly?` | Lists options with `var`, `label`, `type`, current `value`, `default` and, for drop-downs, the allowed `options`. `changedOnly: true` lists only options whose value differs from the default a new build starts with. |
+| `setConfig` | `var` + `value`, and/or `values: { var: value }`, and/or `unset: [var]` | Checkboxes take `true`/`false`, counts take numbers and lists take one of the `options`. `unset` restores the value a new build starts with (for example `"None"` for the pantheon gods). All names are checked first, so an unknown name changes nothing. If the call changes any option it was not given, the result lists it in `unexpectedChanges`. |
 
 ### UI
 

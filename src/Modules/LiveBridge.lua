@@ -1028,6 +1028,29 @@ end
 
 local configOptions = require("Modules.ConfigOptions")
 
+-- The value a new config set starts with (same rule as ConfigTab:NewConfigSet)
+local function configDefault(varData)
+	if varData.defaultIndex and varData.list and varData.list[varData.defaultIndex] then
+		return varData.list[varData.defaultIndex].val
+	end
+	return varData.defaultState
+end
+
+local function configIsDefault(varData, value)
+	local default = configDefault(varData)
+	if varData.type == "check" then
+		return (value and true or false) == (default and true or false)
+	end
+	return value == nil or value == default
+end
+
+local function findConfigVar(var)
+	for _, varData in ipairs(configOptions) do
+		if varData.var == var then return varData end
+	end
+	error("Unknown config option '" .. tostring(var) .. "' (see listConfig)", 0)
+end
+
 commands.listConfig = function(args)
 	local build = requireBuild()
 	local input = build.configTab.configSets[build.configTab.activeConfigSetId].input
@@ -1035,12 +1058,14 @@ commands.listConfig = function(args)
 	local out = { }
 	for _, varData in ipairs(configOptions) do
 		if varData.var and (query == "" or lower(varData.var):find(query, 1, true) or lower(stripColors(varData.label)):find(query, 1, true)) then
-			local entry = { var = varData.var, label = stripColors(varData.label), type = varData.type, value = input[varData.var], section = varData.section }
+			local value = input[varData.var]
+			local entry = { var = varData.var, label = stripColors(varData.label), type = varData.type, value = value, default = configDefault(varData), section = varData.section }
 			if varData.list then
 				entry.options = { }
 				for _, opt in ipairs(varData.list) do t_insert(entry.options, opt.val) end
 			end
-			if args.changedOnly ~= true or input[varData.var] ~= nil then
+			-- changedOnly: options whose value differs from the default a new build starts with
+			if args.changedOnly ~= true or not configIsDefault(varData, value) then
 				t_insert(out, entry)
 			end
 		end
@@ -1053,28 +1078,43 @@ commands.setConfig = function(args)
 	local configTab = build.configTab
 	local input = configTab.configSets[configTab.activeConfigSetId].input
 	local values = args.values or { }
+	if type(values) ~= "table" then error("'values' must be an object { var: value }", 0) end
 	if args.var then values[args.var] = args.value end
 	local unset = args.unset or { }
+	if type(unset) == "string" then unset = { unset } end
+	if type(unset) ~= "table" then error("'unset' must be a list of option names", 0) end
 	if next(values) == nil and #unset == 0 then error("Pass 'var' + 'value', 'values' or 'unset'", 0) end
-	local function checkVar(var)
-		for _, varData in ipairs(configOptions) do
-			if varData.var == var then return varData end
-		end
-		error("Unknown config option '" .. tostring(var) .. "' (see listConfig)", 0)
-	end
+	-- validate everything before changing anything
+	local named = { }
+	for var in pairs(values) do findConfigVar(var) named[var] = true end
+	for _, var in ipairs(unset) do findConfigVar(var) named[var] = true end
+	local before = copyTable(input)
+
 	for var, value in pairs(values) do
-		checkVar(var)
 		input[var] = value
 	end
 	for _, var in ipairs(unset) do
-		checkVar(var)
-		input[var] = nil
+		-- back to the value a new build starts with, not nil: list options such as the
+		-- pantheon gods and bandit have a real default value
+		input[var] = configDefault(findConfigVar(var))
 	end
 	configTab:UpdateControls()
 	configTab:AddUndoState()
 	configTab:BuildModList()
 	markChanged(build)
-	return { set = values, unset = #unset > 0 and unset or nil }, true
+
+	-- Safety net: report any option this call changed without being asked to
+	local unexpected = { }
+	for _, varData in ipairs(configOptions) do
+		local var = varData.var
+		if var and not named[var] and before[var] ~= input[var] then
+			t_insert(unexpected, { var = var, before = before[var], after = input[var] })
+		end
+	end
+	if #unexpected > 0 then
+		ConPrintf("LiveBridge: setConfig changed %d options it was not asked to", #unexpected)
+	end
+	return { set = values, unset = #unset > 0 and unset or nil, unexpectedChanges = #unexpected > 0 and unexpected or nil }, true
 end
 
 -- UI --------------------------------------------------------------------------
