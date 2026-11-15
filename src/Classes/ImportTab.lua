@@ -811,16 +811,40 @@ function ImportTabClass:SaveAccountHistory()
 	end
 end
 
+-- URL of one of the public character-window endpoints for a character
+local function siteCharacterURL(realm, endpoint, accountName, charName)
+	return realm.hostName .. "character-window/" .. endpoint .. "?accountName=" ..
+		accountName:gsub("#", "%%23") .. "&character=" .. urlEncode(charName) .. "&realm=" .. realm.realmCode
+end
+
+-- Turn a get-passive-skills response into the charData shape that ImportPassiveTreeAndJewels expects
+function ImportTabClass:SitePassivesToCharData(charListData, responseLua)
+	-- Account-name imports omit quest choices, so keep the build's current values.
+	responseLua.bandit_choice = responseLua.bandit_choice or self.build.configTab.input.bandit
+	responseLua.pantheon_major = responseLua.pantheon_major or self.build.configTab.input.pantheonMajorGod
+	responseLua.pantheon_minor = responseLua.pantheon_minor or self.build.configTab.input.pantheonMinorGod
+	-- modify response to be like the oauth API response
+	local charData = copyTable(charListData)
+	charData.passives = responseLua
+	charData.jewels = responseLua.items
+	return charData
+end
+
+-- Turn a get-items response into the charData shape that ImportItemsAndSkills expects
+function ImportTabClass.SiteItemsToCharData(charListData, responseLua)
+	local charData = copyTable(charListData)
+	charData.equipment = responseLua.items
+	charData.guardian = responseLua.guardian
+	return charData
+end
+
 function ImportTabClass:DownloadPassiveTree(realm)
 	self.charImportMode = "IMPORTING"
 	self.charImportStatus = "Retrieving character passive tree..."
 	local accountName = self.controls.siteAccountName.buf
 	local charSelect = self.controls.siteCharSelect
 	local charListData = charSelect.list[charSelect.selIndex].char
-	launch:DownloadPage(
-	realm.hostName ..
-	"character-window/get-passive-skills?accountName=" ..
-	accountName:gsub("#", "%%23") .. "&character=" .. urlEncode(charListData.name) .. "&realm=" .. realm.realmCode,
+	launch:DownloadPage(siteCharacterURL(realm, "get-passive-skills", accountName, charListData.name),
 		function(response, errMsg)
 			self.charImportMode = "SELECTCHAR"
 			if errMsg then
@@ -835,15 +859,7 @@ function ImportTabClass:DownloadPassiveTree(realm)
 			if not self.lastLeague then
 				self.lastLeague = self.controls.siteCharSelectLeague:GetSelValueByKey("league")
 			end
-			local responseLua = dkjson.decode(response.body)
-			-- Account-name imports omit quest choices, so keep the build's current values.
-			responseLua.bandit_choice = responseLua.bandit_choice or self.build.configTab.input.bandit
-			responseLua.pantheon_major = responseLua.pantheon_major or self.build.configTab.input.pantheonMajorGod
-			responseLua.pantheon_minor = responseLua.pantheon_minor or self.build.configTab.input.pantheonMinorGod
-			-- modify response to be like the oauth API response
-			local charData = copyTable(charListData)
-			charData.passives = responseLua
-			charData.jewels = responseLua.items
+			local charData = self:SitePassivesToCharData(charListData, dkjson.decode(response.body))
 			local deleteJewels = self.controls.siteCharImportTreeClearJewels.state
 			self:ImportPassiveTreeAndJewels(charData, deleteJewels)
 		end)
@@ -855,10 +871,7 @@ function ImportTabClass:DownloadItems(realm)
 	local accountName = self.controls.siteAccountName.buf
 	local charSelect = self.controls.siteCharSelect
 	local charListData = charSelect.list[charSelect.selIndex].char
-	launch:DownloadPage(
-	realm.hostName ..
-	"character-window/get-items?accountName=" ..
-		accountName:gsub("#", "%%23") .. "&character=" .. urlEncode(charListData.name) .. "&realm=" .. realm.realmCode,
+	launch:DownloadPage(siteCharacterURL(realm, "get-items", accountName, charListData.name),
 		function(response, errMsg)
 			self.charImportMode = "SELECTCHAR"
 			if errMsg then
@@ -873,17 +886,106 @@ function ImportTabClass:DownloadItems(realm)
 			if not self.lastLeague then
 				self.lastLeague = self.controls.siteCharSelectLeague:GetSelValueByKey("league")
 			end
-			local responseLua = dkjson.decode(response.body)
-			-- modify response to be like the oauth API response
-			local charData = copyTable(charListData)
-			charData.equipment = responseLua.items
-			charData.guardian = responseLua.guardian
+			local charData = self.SiteItemsToCharData(charListData, dkjson.decode(response.body))
 			local clearItems = self.controls.siteCharImportItemsClearItems.state
 			local clearSkills = self.controls.siteCharImportItemsClearSkills.state
 			local ignoreWeaponSwap = self.controls.siteCharImportItemsIgnoreWeaponSwap.state
 			self:ImportItemsAndSkills(charData, clearItems, clearSkills, ignoreWeaponSwap)
 		end)
 end
+
+-- Download everything needed to import a character from its public profile, without any UI.
+-- Same requests as the "Import from website" flow: character list, profile page (for the
+-- case-correct account name), passive tree and items.
+-- callback(result, errMsg); result = { accountName, char, passives, items }
+function ImportTabClass.FetchSiteCharacter(realmCode, accountName, charName, callback)
+	local realm
+	for _, r in ipairs(realmList) do
+		if r.realmCode == (realmCode or "pc"):lower() then realm = r end
+	end
+	if not realm then
+		return callback(nil, "Unknown realm '" .. tostring(realmCode) .. "' (use pc, xbox or sony)")
+	end
+	-- Same account name normalisation as DownloadSiteCharacterList
+	if realm.realmCode == "pc" then
+		accountName = accountName:gsub("%s+", "")
+	else
+		accountName = accountName:gsub("^[%s?]+", ""):gsub("[%s?]+$", ""):gsub("%s", "+")
+	end
+	accountName = accountName:gsub("(.*)[#%-]", "%1#")
+	local function fail(msg)
+		callback(nil, msg)
+	end
+	local function decode(response, what)
+		local data = response and response.body and response.body ~= "false" and dkjson.decode(response.body)
+		if type(data) ~= "table" then
+			fail("Failed to retrieve " .. what .. ", try again.")
+		end
+		return type(data) == "table" and data or nil
+	end
+	launch:DownloadPage(realm.hostName .. "character-window/get-characters?accountName=" .. accountName:gsub("#", "%%23") .. "&realm=" .. realm.realmCode,
+		function(response, errMsg)
+			if errMsg == "Response code: 401" or errMsg == "Response code: 403" then
+				return fail("Account profile is private or does not exist.")
+			elseif errMsg == "Response code: 404" then
+				return fail("Account name is incorrect.")
+			elseif errMsg then
+				return fail("Error retrieving character list (" .. errMsg:gsub("\n", " ") .. ")")
+			end
+			local charList = decode(response, "character list")
+			if not charList then return end
+			local charListData
+			for _, char in ipairs(charList) do
+				if char.realm == realm.realmCode and char.name == charName then charListData = char break end
+			end
+			if not charListData then
+				for _, char in ipairs(charList) do
+					if char.realm == realm.realmCode and tostring(char.name):lower() == charName:lower() then charListData = char break end
+				end
+			end
+			if not charListData then
+				return fail("Character '" .. charName .. "' not found on account " .. accountName .. " (" .. #charList .. " characters)")
+			end
+			-- get-characters ignores account name case but the other endpoints don't: read the real name from the profile page
+			launch:DownloadPage(realm.hostName .. realm.profileURL .. accountName:gsub("#", "%%23"),
+				function(response, errMsg)
+					local realAccountName = not errMsg and response and response.body and response.body:match("/view%-profile/([^/]+)/characters")
+					if realAccountName then
+						accountName = realAccountName:gsub(".", function(c) if c:byte(1) > 127 then return string.format("%%%2X", c:byte(1)) else return c end end)
+							:gsub("(.*)[#%-]", "%1#")
+					end
+					launch:DownloadPage(siteCharacterURL(realm, "get-passive-skills", accountName, charListData.name),
+						function(response, errMsg)
+							if errMsg then return fail("Error retrieving passive tree (" .. errMsg:gsub("\n", " ") .. ")") end
+							local passives = decode(response, "passive tree")
+							if not passives then return end
+							launch:DownloadPage(siteCharacterURL(realm, "get-items", accountName, charListData.name),
+								function(response, errMsg)
+									if errMsg then return fail("Error retrieving items (" .. errMsg:gsub("\n", " ") .. ")") end
+									local items = decode(response, "items")
+									if not items then return end
+									callback({ accountName = accountName, realm = realm, char = charListData, passives = passives, items = items })
+								end)
+						end)
+				end)
+		end)
+end
+
+-- Import a character fetched by FetchSiteCharacter into this build, with no confirmation popups.
+-- opts: deleteJewels, clearItems, clearSkills (default true, like the UI), ignoreWeaponSwap (default false)
+function ImportTabClass:ImportSiteCharacter(fetched, opts)
+	opts = opts or { }
+	local function default(v, d) if v == nil then return d end return v end
+	local passivesData = self:SitePassivesToCharData(fetched.char, fetched.passives)
+	self:ImportPassiveTreeAndJewels(passivesData, default(opts.deleteJewels, true))
+	local itemsData = self.SiteItemsToCharData(fetched.char, fetched.items)
+	self:ImportItemsAndSkills(itemsData, default(opts.clearItems, true), default(opts.clearSkills, true), default(opts.ignoreWeaponSwap, false))
+	self.lastRealm = fetched.realm.id
+	self.lastAccountHash = common.sha1(fetched.accountName)
+	self.lastCharacterHash = common.sha1(fetched.char.name)
+	self.lastLeague = fetched.char.league
+end
+
 function ImportTabClass:DownloadSiteCharacterList(realm)
 	function FindMatchingStandardLeague(league)
 		-- Find a Standard league name for a given league name
