@@ -938,20 +938,53 @@ commands.editSkillGroup = function(args)
 		group.gemList = { }
 		for _, g in ipairs(args.gems) do t_insert(group.gemList, gemFromArg(g)) end
 	end
-	for _, change in ipairs(args.setGems or { }) do
-		for _, gem in ipairs(group.gemList) do
-			if lower(gem.nameSpec):gsub(" support$", "") == lower(change.name):gsub(" support$", "") then
-				if change.level then gem.level = tonumber(change.level) end
-				if change.quality then gem.quality = tonumber(change.quality) end
-				if change.enabled ~= nil then gem.enabled = change.enabled end
+	local updated = { }
+	if args.setGems ~= nil then
+		if type(args.setGems) ~= "table" or (next(args.setGems) ~= nil and args.setGems[1] == nil) then
+			error("'setGems' must be a list: [{ \"name\": ..., \"level\"?: ..., \"quality\"?: ..., \"enabled\"?: ... }]", 0)
+		end
+		local function key(name)
+			return (lower(name):gsub("^%s+", ""):gsub("%s+$", ""):gsub(" support$", ""))
+		end
+		-- match everything first, so an unknown name changes nothing
+		local unmatched, plan = { }, { }
+		for _, change in ipairs(args.setGems) do
+			if type(change) ~= "table" or type(change.name) ~= "string" then
+				error("Each 'setGems' entry needs a 'name'", 0)
 			end
+			if change.level ~= nil and not tonumber(change.level) then error("Invalid level for '" .. change.name .. "'", 0) end
+			if change.quality ~= nil and not tonumber(change.quality) then error("Invalid quality for '" .. change.name .. "'", 0) end
+			local wanted, hit = key(change.name), false
+			for _, gem in ipairs(group.gemList) do
+				for _, n in pairs({ gem.nameSpec, gem.gemData and gem.gemData.name, gem.grantedEffect and gem.grantedEffect.name }) do
+					if key(n) == wanted then
+						t_insert(plan, { gem = gem, change = change })
+						hit = true
+						break
+					end
+				end
+			end
+			if not hit then t_insert(unmatched, change.name) end
+		end
+		if #unmatched > 0 then
+			local present = { }
+			for _, gem in ipairs(group.gemList) do t_insert(present, gem.nameSpec) end
+			error(s_format("No gem named %s in socket group %s (gems: %s). No gem was changed.",
+				table.concat(unmatched, ", "), tostring(args.index), table.concat(present, ", ")), 0)
+		end
+		for _, step in ipairs(plan) do
+			local gem, change = step.gem, step.change
+			if change.level ~= nil then gem.level = tonumber(change.level) end
+			if change.quality ~= nil then gem.quality = tonumber(change.quality) end
+			if change.enabled ~= nil then gem.enabled = change.enabled and true or false end
+			t_insert(updated, { name = gem.nameSpec, level = gem.level, quality = gem.quality, enabled = gem.enabled ~= false })
 		end
 	end
 	skillsTab:ProcessSocketGroup(group)
 	if skillsTab.displayGroup == group then skillsTab:SetDisplayGroup(group) end
 	skillsTab:AddUndoState()
 	markChanged(build)
-	return { index = args.index }, true
+	return { index = args.index, updatedGems = #updated > 0 and updated or nil }, true
 end
 
 commands.removeSkillGroup = function(args)

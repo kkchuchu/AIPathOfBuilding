@@ -202,7 +202,7 @@ Slot names follow PoB: `Weapon 1`, `Weapon 2`, `Helmet`, `Body Armour`, `Gloves`
 |---|---|---|
 | `listSkills` | – | Socket groups (`index`, `label`, `slot`, `enabled`, `isMain`, `activeSkills`, `gems`). |
 | `addSkillGroup` | `gems`, `label?`, `slot?`, `main?` | `gems` entries are names (`"Spell Echo Support"` or `"Spell Echo"`) or `{ name, level?, quality?, enabled? }`. Names PoB does not recognise are returned in `unknownGems`. |
-| `editSkillGroup` | `index`, then any of `label`, `enabled`, `slot`, `gems` (replaces all gems), `setGems: [{ name, level?, quality?, enabled? }]` | |
+| `editSkillGroup` | `index`, then any of `label`, `enabled`, `slot`, `gems` (replaces all gems), `setGems: [{ name, level?, quality?, enabled? }]` | `setGems` changes gems already in the group, matched by name with or without " Support". It must be a list. If any name matches no gem in the group, the command fails and lists the group's gems, and no gem is changed. The result lists `updatedGems`. `diff` is empty when the group is not the main skill. |
 | `removeSkillGroup` | `index` | |
 | `setMainSkill` | `index` **or** `name` (active skill name), `activeSkill?` | Sets the skill shown in the sidebar and used for DPS. |
 
