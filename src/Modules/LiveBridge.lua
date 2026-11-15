@@ -22,7 +22,7 @@ local t_sort = table.sort
 local s_format = string.format
 
 local bridge = {
-	version = "1.0.0",
+	version = "1.1.0",
 	-- Set POB_BRIDGE=0 to turn the bridge off completely
 	enabled = os.getenv("POB_BRIDGE") ~= "0" and not LIVEBRIDGE_DISABLED,
 	commandsProcessed = 0,
@@ -497,10 +497,9 @@ commands.exportCode = function()
 	return { code = code }
 end
 
-commands.save = function(args)
-	local build = requireBuild()
-	if args.name then
-		local name = safeBuildName(args.name)
+local function saveBuild(build, name)
+	if name then
+		name = safeBuildName(name)
 		build.dbFileName = main.buildPath .. name .. ".xml"
 		build.buildName = name
 		build.dbFileSubPath = ""
@@ -515,7 +514,83 @@ commands.save = function(args)
 	f:close()
 	build:ResetModFlags()
 	build.spec:SetWindowTitleWithBuildClass()
-	return { saved = build.dbFileName }
+	return build.dbFileName
+end
+
+commands.save = function(args)
+	return { saved = saveBuild(requireBuild(), args.name) }
+end
+
+-- Async commands: a handler can return (nil, "async", step). step() is called once per frame
+-- on the main thread until it returns (true, result) or raises an error. (Not a coroutine:
+-- LaunchSubScript, and so launch:DownloadPage, crashes the runtime when called from one.)
+
+local function buildIsSettled()
+	if main.newMode then return false end
+	local build = currentBuild()
+	return not (build and build.buildFlag)
+end
+
+-- Import a character straight from pathofexile.com (public profile), like Import/Export ->
+-- "Import from website", but without any confirmation popup.
+commands.importCharacter = function(args)
+	local account = type(args.account) == "string" and args.account or error("Missing 'account' (e.g. \"name#1234\")", 0)
+	if not account:match("%S[#%-]%d%d%d%d%s*$") then
+		error("Account name needs its discriminator, e.g. " .. account .. "#1234", 0)
+	end
+	local character = type(args.character) == "string" and args.character ~= "" and args.character or error("Missing 'character'", 0)
+	if args.name then safeBuildName(args.name) end -- validate before downloading anything
+	local intoNewBuild = args.newBuild ~= false or not currentBuild()
+
+	local fetched, fetchErr
+	if not common.classes.ImportTab then LoadModule("Classes/ImportTab") end
+	common.classes.ImportTab.FetchSiteCharacter(args.realm or "pc", account, character, function(result, err)
+		fetched, fetchErr = result, err or (not result and "Download failed") or nil
+	end)
+
+	local stage, deadline = "downloading the character from pathofexile.com", GetTime() + 90000
+	local function nextStage(name, timeout)
+		stage, deadline = name, GetTime() + timeout
+	end
+	return nil, "async", function()
+		if GetTime() > deadline then error("Timed out " .. stage, 0) end
+		if fetchErr then error(fetchErr, 0) end
+		if not fetched then return end
+		if stage == "downloading the character from pathofexile.com" then
+			if intoNewBuild then
+				main:SetMode("BUILD", false, args.name or (fetched.accountName:gsub("#%d+$", "") .. " - " .. fetched.char.name))
+			end
+			nextStage("opening a new build", 10000)
+		elseif stage == "opening a new build" then
+			if main.newMode or not currentBuild() then return end
+			local build = currentBuild()
+			build.importTab:ImportSiteCharacter(fetched, {
+				deleteJewels = args.deleteJewels, clearItems = args.clearItems, clearSkills = args.clearSkills, ignoreWeaponSwap = args.ignoreWeaponSwap,
+			})
+			markChanged(build)
+			nextStage("recalculating the imported build", 30000)
+		elseif stage == "recalculating the imported build" then
+			if not buildIsSettled() then return end
+			local build = requireBuild()
+			local saved = args.name and saveBuild(build, args.name) or nil
+			local state = collectState(build)
+			return true, {
+				imported = { account = fetched.accountName, character = fetched.char.name, league = fetched.char.league, realm = fetched.realm.realmCode },
+				newBuild = intoNewBuild,
+				saved = saved,
+				buildName = build.buildName,
+				level = state.level,
+				class = state.class,
+				ascendancy = state.ascendancy,
+				mainSkill = state.mainSkill,
+				mainSocketGroup = state.mainSocketGroup,
+				passives = { pointsUsed = state.passives.pointsUsed, ascendancyPointsUsed = state.passives.ascendancyPointsUsed, keystones = state.passives.keystones },
+				equippedItems = #state.items,
+				socketGroups = #state.skills,
+				dps = { FullDPS = state.keyStats.FullDPS, CombinedDPS = state.keyStats.CombinedDPS, TotalDPS = state.keyStats.TotalDPS },
+			}
+		end
+	end
 end
 
 -- Character -------------------------------------------------------------------
@@ -1016,7 +1091,7 @@ local showToasts = os.getenv("POB_BRIDGE_TOAST") ~= "0"
 
 local function describeArgs(args)
 	local parts = { }
-	for _, key in ipairs({ "name", "id", "nodes", "add", "remove", "class", "ascendancy", "level", "tab", "var", "value", "values", "slot", "label", "query" }) do
+	for _, key in ipairs({ "account", "character", "name", "id", "nodes", "add", "remove", "class", "ascendancy", "level", "tab", "var", "value", "values", "slot", "label", "query" }) do
 		local v = args[key]
 		if v ~= nil then
 			if type(v) == "table" then
@@ -1122,9 +1197,17 @@ local function runCommand(cmd)
 		writeResponse(cmd.id, { id = cmd.id, cmd = cmd.cmd, ok = false, error = "Unknown command '" .. tostring(cmd.cmd) .. "' (try 'help')" })
 		return
 	end
-	local ok, result, mutated = pcall(handler, type(cmd.args) == "table" and cmd.args or { })
+	local ok, result, mutated, job = pcall(handler, type(cmd.args) == "table" and cmd.args or { })
 	bridge.commandsProcessed = bridge.commandsProcessed + 1
 	local response = { id = cmd.id, cmd = cmd.cmd, ok = ok }
+	if ok and mutated == "async" then
+		pending = { response = response, frames = 0, cmd = cmd, job = job }
+		if showToasts and ToastNotification then
+			showActivity(cmd, { ok = true })
+			toastHideAt = nil -- keep it up until the job finishes
+		end
+		return
+	end
 	if ok then
 		response.result = result
 	else
@@ -1141,13 +1224,6 @@ local function runCommand(cmd)
 			showActivity(cmd, response)
 		end
 	end
-end
-
-local function buildIsSettled()
-	if main.newMode then return false end
-	local build = currentBuild()
-	if build and build.buildFlag then return false end
-	return true
 end
 
 ---------------------------------------------------------------------------
@@ -1225,6 +1301,24 @@ function bridge:OnMainFrame()
 	end
 	local ok, err = pcall(function()
 		ensureDirs()
+		if pending and pending.job then
+			local okJob, done, result = pcall(pending.job)
+			if not okJob then
+				local response = pending.response
+				response.ok = false
+				response.error = tostring(done)
+				ConPrintf("LiveBridge: %s failed: %s", tostring(response.cmd), tostring(done))
+				writeResponse(response.id, response)
+				showActivity(pending.cmd, response)
+				pending = nil
+			elseif done then
+				-- finished: answer like any other mutating command, once the build has settled
+				pending.response.result = result
+				pending.job = nil
+				pending.frames = 0
+			end
+			return
+		end
 		if pending then
 			pending.frames = pending.frames + 1
 			-- wait for the recalculation that the command triggered

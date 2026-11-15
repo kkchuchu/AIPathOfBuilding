@@ -11,6 +11,7 @@ CLI examples:
     python pob_bridge.py allocNode name="Elemental Equilibrium"
     python pob_bridge.py whatIfNodes '{"add": ["Heart of Thunder"]}'
     python pob_bridge.py addItem --text-file ring.txt slot="Ring 1"
+    python pob_bridge.py importCharacter account="name#1234" character=MyChar
     python pob_bridge.py state            # print summary.txt (no round trip)
 
 Library example:
@@ -47,6 +48,10 @@ class BridgeError(RuntimeError):
     pass
 
 
+# Commands that wait on the network get a longer default timeout
+SLOW_COMMANDS = {"importCharacter": 120.0}
+
+
 class PoBBridge:
     def __init__(self, bridge_dir: str | os.PathLike | None = None, timeout: float = 30.0):
         self.dir = Path(bridge_dir) if bridge_dir else default_bridge_dir()
@@ -69,7 +74,9 @@ class PoBBridge:
         tmp.replace(commands / f"{cmd_id}.json")
 
         response_file = responses / f"{cmd_id}.json"
-        deadline = time.monotonic() + (timeout or self.timeout)
+        if timeout is None:
+            timeout = max(self.timeout, SLOW_COMMANDS.get(cmd, 0.0))
+        deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             if response_file.exists():
                 try:

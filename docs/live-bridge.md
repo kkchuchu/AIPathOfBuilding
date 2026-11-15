@@ -160,6 +160,7 @@ All files are written to a temporary file first and then renamed, so readers nev
 | `openBuild` | `name` | opens `<build folder>/<name>.xml` |
 | `newBuild` | `name?` | new empty build |
 | `importBuild` | `code` **or** `xml`, `name?` | `code` is a PoB build code, as produced by Import/Export → Generate. Replaces the open build without asking for confirmation. |
+| `importCharacter` | `account`, `character`, `realm?` (`pc`), `newBuild?` (true), `name?`, `deleteJewels?` / `clearItems?` / `clearSkills?` (true), `ignoreWeaponSwap?` (false) | Imports a character's passive tree, jewels, items and skills from its **public** pathofexile.com profile, like Import/Export → "Import from website", without any confirmation popup. `account` needs its discriminator (`name#1234`). By default the character goes into a new build, so the open build is left alone; `newBuild: false` imports into the open build instead. `name` also saves the result under that file name in the build folder. The response arrives once the download and recalculation are done (usually a few seconds) and summarises the build: `level`, `class`, `ascendancy`, `mainSkill`, `passives`, `equippedItems`, `socketGroups`, `dps`. |
 | `exportCode` | – | `{ code }`: a shareable PoB build code |
 | `save` | `name?` | Saves the open build. `name` saves under a new file name in the build folder (no paths allowed). |
 
@@ -261,11 +262,12 @@ The Python client uses `POB_BRIDGE_DIR` too, or `--dir`.
 - Any program running as your Windows user that can write to the bridge folder can control the open build. That user can already change your PoB files directly, so this gives them nothing new, but keep the folder out of shared or synced locations.
 - Build names in `save` and `openBuild` are limited to plain file names inside the build folder.
 - Commands never run code. They can only call the fixed set of actions listed above.
-- The bridge makes no network connections.
+- The bridge makes no network connections, except for `importCharacter`, which downloads the named character from pathofexile.com using the same requests as PoB's own "Import from website".
 
 ## Limitations
 
 - Path of Exile 1 (Community fork) only.
+- `importCharacter` works only for public profiles (pathofexile.com → Privacy settings → "Hide characters" off). Like the website import in PoB, it cannot read bandit or pantheon choices, and the main skill is PoB's usual guess (the largest socket group), which may be a group with no active skill. Use `setMainSkill` afterwards.
 - Jewel sockets, cluster jewels, timeless jewel conversions and tattoos are not yet editable through commands. Their effects are still included in every stat.
 - Undo history: commands record undo states, so Ctrl+Z works per tab as usual. There is no single undo for a whole command sequence. Use `exportCode` before experimenting and `importBuild` to roll back.
 - One PoB instance per bridge folder. PoB itself only allows one instance at a time.
@@ -275,8 +277,10 @@ The Python client uses `POB_BRIDGE_DIR` too, or `--dir`.
 
 - Bridge module: [`src/Modules/LiveBridge.lua`](../src/Modules/LiveBridge.lua). Hooks: two small calls in `src/Modules/Main.lua` and `src/Modules/Build.lua`.
 - To add a command, add `commands.myCommand = function(args) ... return result, mutated end`. Return `mutated = true` when the command changes the build, so the response waits for recalculation and includes `diff`.
+- A command that has to wait (for a download, say) returns `nil, "async", step`. The bridge calls `step()` once per frame on the main thread until it returns `true, result` or raises an error; other commands queue behind it. Do not use a coroutine for this: `launch:DownloadPage` crashes the runtime when called from inside one.
 - Run `python tools/bridge_selftest.py` against a running PoB before you submit changes.
 
 ## Changelog
 
+- **1.1.0** (2026-11-15): adds `importCharacter` (import from a public pathofexile.com profile with no popups) and support for asynchronous commands.
 - **1.0.0** (2026-11-14): first release. Adds state export, 36 commands, what-if previews, activity toasts, the Python client and the self-test.
