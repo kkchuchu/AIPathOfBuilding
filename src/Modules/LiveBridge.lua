@@ -935,8 +935,23 @@ commands.editSkillGroup = function(args)
 	if args.enabled ~= nil then group.enabled = args.enabled end
 	if args.slot ~= nil then group.slot = args.slot ~= "" and args.slot or nil end
 	if args.gems then
+		-- keep each gem's selected skill part (e.g. Tornado Shot "Combined Average Projectiles")
+		local oldParts = { }
+		for _, gem in ipairs(group.gemList) do
+			if gem.nameSpec then oldParts[lower(gem.nameSpec)] = { gem.skillPart, gem.skillPartCalcs } end
+		end
 		group.gemList = { }
-		for _, g in ipairs(args.gems) do t_insert(group.gemList, gemFromArg(g)) end
+		for _, g in ipairs(args.gems) do
+			local gem = gemFromArg(g)
+			local old = oldParts[lower(gem.nameSpec)]
+			if type(g) == "table" and tonumber(g.skillPart) then
+				gem.skillPart = tonumber(g.skillPart)
+				gem.skillPartCalcs = tonumber(g.skillPart)
+			elseif old then
+				gem.skillPart, gem.skillPartCalcs = old[1], old[2]
+			end
+			t_insert(group.gemList, gem)
+		end
 	end
 	local updated = { }
 	if args.setGems ~= nil then
