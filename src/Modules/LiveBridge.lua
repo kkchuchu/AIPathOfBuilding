@@ -22,7 +22,7 @@ local t_sort = table.sort
 local s_format = string.format
 
 local bridge = {
-	version = "1.1.0",
+	version = "1.2.0",
 	-- Set POB_BRIDGE=0 to turn the bridge off completely
 	enabled = os.getenv("POB_BRIDGE") ~= "0" and not LIVEBRIDGE_DISABLED,
 	commandsProcessed = 0,
@@ -880,6 +880,263 @@ commands.whatIfItem = function(args)
 	local base = calcFunc({ }, true)
 	local after = calcFunc({ repSlotName = slot.slotName, repItem = item }, true)
 	return { item = item.name, slot = slot.slotName, diff = statDiff(base, after, args.stats) }
+end
+
+-- Jewels and cluster jewels -----------------------------------------------------
+
+local CLUSTER_SOCKET_SIZES = { [0] = "Small", [1] = "Medium", [2] = "Large" }
+
+-- Resolve a jewel socket by node id, slot name ("Jewel 26725") or the name of the
+-- jewel socketed in it (a prefix is enough: "Hypnotic Bliss").
+local function findSocket(build, ref)
+	if ref == nil then error("Missing 'socket' (node id, 'Jewel <id>' or the socketed jewel's name)", 0) end
+	local itemsTab, spec = build.itemsTab, build.spec
+	local id = tonumber(ref) or tonumber(tostring(ref):match("^[Jj]ewel%s+(%d+)$"))
+	if id then
+		return itemsTab.sockets[id] or error("No jewel socket with node id " .. id, 0)
+	end
+	local name = lower(ref)
+	local matches = { }
+	for nodeId, slot in pairs(itemsTab.sockets) do
+		local item = spec.allocNodes[nodeId] and spec:GetSocketedJewel(nodeId)
+		if item and lower(item.name):sub(1, #name) == name then
+			t_insert(matches, slot)
+		end
+	end
+	if #matches == 0 then error("No allocated socket holds a jewel named '" .. tostring(ref) .. "'", 0) end
+	if #matches > 1 then error("More than one socketed jewel matches '" .. tostring(ref) .. "'; pass the socket id", 0) end
+	return matches[1]
+end
+
+local function subGraphAt(spec, socketId)
+	for _, subGraph in pairs(spec.subGraphs) do
+		if subGraph.parentSocket.id == socketId then
+			return subGraph
+		end
+	end
+end
+
+-- The passives a cluster jewel added to a socket, with nested clusters under their socket
+local function clusterNodeInfo(spec, socketId)
+	local subGraph = subGraphAt(spec, socketId)
+	if not subGraph then return nil end
+	local nodes = { }
+	for _, graphNode in ipairs(subGraph.nodes) do
+		local node = spec.nodes[graphNode.id] or graphNode
+		local info = nodeInfo(node, spec)
+		if node.type == "Socket" then
+			local jewel = spec:GetSocketedJewel(node.id)
+			info.jewel = jewel and jewel.name
+			info.cluster = clusterNodeInfo(spec, node.id)
+		end
+		t_insert(nodes, info)
+	end
+	return nodes
+end
+
+-- Allocate the passives a cluster jewel added (all of them, or those whose id or name is
+-- in 'wanted'). Allocating a socket rebuilds the subgraphs and replaces their node tables,
+-- so look the subgraph up again after every allocation.
+local function allocateClusterNodes(spec, socketId, wanted)
+	local done = { }
+	for _ = 1, 64 do
+		local subGraph = subGraphAt(spec, socketId)
+		if not subGraph then
+			error("Socket " .. socketId .. " has no cluster passives (allocate the socket and socket a valid cluster jewel first)", 0)
+		end
+		local target
+		for _, graphNode in ipairs(subGraph.nodes) do
+			local node = spec.nodes[graphNode.id]
+			-- Skip the cluster's placeholder mastery ("Nothingness"); it is never allocatable
+			if node and not node.alloc and node.path and node.type ~= "Mastery" and (not wanted or wanted[node.id] or wanted[lower(node.dn)]) then
+				target = node
+				break
+			end
+		end
+		if not target then return done end
+		local cost = target.pathDist
+		spec:AllocNode(target)
+		t_insert(done, { id = target.id, name = target.dn, pointsSpent = cost })
+	end
+	return done
+end
+
+local function wantedNodes(list)
+	if type(list) ~= "table" then return nil end
+	local wanted = { }
+	for _, ref in ipairs(list) do
+		wanted[tonumber(ref) or lower(ref)] = true
+	end
+	return wanted
+end
+
+-- Copy of the build's tree for what-if jewel swaps. ItemsTab's comparison clone leaves the
+-- cluster subgraphs out; carry them over so BuildClusterJewelGraphs can replace them.
+local function cloneSpecWithClusters(build)
+	local spec = build.spec
+	local clone = build.itemsTab.CloneSpecForJewelComparison(spec)
+	for key, subGraph in pairs(spec.subGraphs) do
+		local nodes = { }
+		for _, node in ipairs(subGraph.nodes) do
+			t_insert(nodes, clone.nodes[node.id] or node)
+		end
+		clone.subGraphs[key] = {
+			nodes = nodes,
+			group = subGraph.group,
+			connectors = subGraph.connectors,
+			parentSocket = clone.nodes[subGraph.parentSocket.id],
+			entranceNode = clone.nodes[subGraph.entranceNode.id],
+		}
+	end
+	-- Imported cluster layouts and import allocations belong to the jewels the character
+	-- had, not to the jewel being tried
+	clone.jewel_data = nil
+	clone.extended_hashes = { }
+	return clone
+end
+
+commands.listJewelSockets = function(args)
+	local build = requireBuild()
+	local spec, itemsTab = build.spec, build.itemsTab
+	local out = { }
+	for nodeId, slot in pairs(itemsTab.sockets) do
+		local node = spec.nodes[nodeId]
+		local allocated = spec.allocNodes[nodeId] and true or false
+		if node and (allocated or args.all) then
+			local entry = {
+				socket = nodeId,
+				slot = slot.slotName,
+				allocated = allocated,
+				clusterSocket = node.expansionJewel and CLUSTER_SOCKET_SIZES[node.expansionJewel.size] or nil,
+			}
+			local jewel = spec:GetSocketedJewel(nodeId)
+			if jewel then
+				entry.jewel = { itemId = jewel.id, name = jewel.name, rarity = jewel.rarity, base = jewel.baseName }
+				local subGraph = subGraphAt(spec, nodeId)
+				if subGraph then
+					local total, alloc = 0, 0
+					for _, graphNode in ipairs(subGraph.nodes) do
+						total = total + 1
+						local live = spec.nodes[graphNode.id]
+						if live and live.alloc then alloc = alloc + 1 end
+					end
+					entry.clusterPassives = { allocated = alloc, total = total }
+				end
+			end
+			t_insert(out, entry)
+		end
+	end
+	t_sort(out, function(a, b) return a.socket < b.socket end)
+	return { sockets = out }
+end
+
+commands.clusterNodes = function(args)
+	local build = requireBuild()
+	local spec = build.spec
+	local slot = findSocket(build, args.socket)
+	local jewel = spec:GetSocketedJewel(slot.nodeId)
+	if not (jewel and jewel.jewelData and jewel.jewelData.clusterJewelValid) then
+		error("Socket " .. slot.nodeId .. " has no valid cluster jewel", 0)
+	end
+	local nodes = clusterNodeInfo(spec, slot.nodeId)
+	return {
+		socket = slot.nodeId,
+		jewel = jewel.name,
+		nodes = nodes or { },
+		note = not nodes and "The socket is not allocated, so the jewel adds no passives yet" or nil,
+	}
+end
+
+commands.socketJewel = function(args)
+	local build = requireBuild()
+	local itemsTab = build.itemsTab
+	local slot = findSocket(build, args.socket)
+	local item
+	if args.text then
+		item = parseItem(args.text)
+	elseif tonumber(args.itemId) and tonumber(args.itemId) ~= 0 then
+		item = itemsTab.items[tonumber(args.itemId)] or error("No item with id " .. tostring(args.itemId), 0)
+	elseif tonumber(args.itemId) ~= 0 then
+		error("Pass the jewel 'text', or 'itemId' (0 empties the socket)", 0)
+	end
+	if item and not itemsTab:IsItemValidForSlot(item, slot.slotName) then
+		error(s_format("'%s' cannot be socketed in %s", item.name, slot.slotName), 0)
+	end
+	local previous = build.spec:GetSocketedJewel(slot.nodeId)
+	if item and args.text then
+		itemsTab:AddItem(item, true)
+	end
+	slot:SetSelItemId(item and item.id or 0)
+	itemsTab:PopulateSlots()
+	itemsTab:AddUndoState()
+	build.spec:AddUndoState()
+	markChanged(build)
+	return { socket = slot.nodeId, itemId = item and item.id or 0, jewel = item and item.name, replaced = previous and previous.name }, true
+end
+
+commands.allocClusterNodes = function(args)
+	local build = requireBuild()
+	local spec = build.spec
+	local slot = findSocket(build, args.socket)
+	local before = spec:CountAllocNodes()
+	local done = allocateClusterNodes(spec, slot.nodeId, wantedNodes(args.nodes))
+	spec:AddUndoState()
+	markChanged(build)
+	return { socket = slot.nodeId, allocated = done, pointsSpent = spec:CountAllocNodes() - before }, true
+end
+
+-- What-if: swap a jewel into a socket and (for cluster jewels) allocate its passives, on a
+-- copy of the tree. The build itself is never changed.
+-- allocate: "all" (default), "none" (only passives that carry over by position), or a list
+-- of passive names / ids.
+commands.whatIfJewel = function(args)
+	local build = requireBuild()
+	local itemsTab, spec = build.itemsTab, build.spec
+	local slot = findSocket(build, args.socket)
+	local item
+	if args.text then
+		item = parseItem(args.text)
+	else
+		item = itemsTab.items[tonumber(args.itemId) or -1] or error("Pass the jewel 'text' (or 'itemId' of a jewel already in the build)", 0)
+	end
+	if not itemsTab:IsItemValidForSlot(item, slot.slotName) then
+		error(s_format("'%s' cannot be socketed in %s", item.name, slot.slotName), 0)
+	end
+	local previous = spec:GetSocketedJewel(slot.nodeId)
+
+	local itemId, tempId = item.id, nil
+	if not (itemId and itemsTab.items[itemId] == item) then
+		tempId = -1
+		while itemsTab.items[tempId] do tempId = tempId - 1 end
+		itemsTab.items[tempId] = item
+		itemId = tempId
+	end
+	local ok, result = pcall(function()
+		local clone = cloneSpecWithClusters(build)
+		clone.jewels[slot.nodeId] = itemId
+		clone:BuildClusterJewelGraphs()
+		local mode = args.allocate == nil and "all" or args.allocate
+		local allocated = { }
+		if mode ~= "none" and item.jewelData and item.jewelData.clusterJewelValid and subGraphAt(clone, slot.nodeId) then
+			allocated = allocateClusterNodes(clone, slot.nodeId, wantedNodes(mode))
+		end
+		local calcFunc = build.calcsTab:GetMiscCalculator()
+		local base = calcFunc({ }, true)
+		local after = calcFunc({ spec = clone, repSlotName = slot.slotName, repItem = item }, true)
+		local usedBefore, usedAfter = spec:CountAllocNodes(), clone:CountAllocNodes()
+		return {
+			item = item.name,
+			socket = slot.nodeId,
+			replaces = previous and previous.name,
+			pointsUsed = { before = usedBefore, after = usedAfter, change = usedAfter - usedBefore },
+			allocated = allocated,
+			clusterPassives = clusterNodeInfo(clone, slot.nodeId),
+			diff = statDiff(base, after, args.stats),
+		}
+	end)
+	if tempId then itemsTab.items[tempId] = nil end
+	if not ok then error(result, 0) end
+	return result
 end
 
 -- Skills ----------------------------------------------------------------------

@@ -4209,6 +4209,8 @@ local function cloneSpecForJewelComparison(spec)
 
 	return specCopy
 end
+-- Exposed for LiveBridge's what-if jewel comparison
+ItemsTabClass.CloneSpecForJewelComparison = cloneSpecForJewelComparison
 
 ---@param itemsTab ItemsTab
 ---@param compareSlot ItemSlotControl
