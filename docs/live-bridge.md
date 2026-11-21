@@ -196,6 +196,18 @@ All files are written to a temporary file first and then renamed, so readers nev
 
 Slot names follow PoB: `Weapon 1`, `Weapon 2`, `Helmet`, `Body Armour`, `Gloves`, `Boots`, `Amulet`, `Ring 1`, `Ring 2`, `Belt`, `Flask 1`–`Flask 5`, and so on.
 
+### Jewels and cluster jewels
+
+`socket` is the socket's node id, its slot name (`Jewel 26725`), or the start of the name of the jewel in it (`Hypnotic Bliss`).
+
+| Command | Args | Notes |
+|---|---|---|
+| `listJewelSockets` | `all?` | Allocated jewel sockets with their jewel and, for cluster jewels, how many of the added passives are allocated. `all: true` includes unallocated sockets. |
+| `clusterNodes` | `socket` | Passives a cluster jewel added (id, name, stats, allocated), with nested cluster jewels under their socket. Use the ids with `allocNode` / `deallocNode`. |
+| `socketJewel` | `socket`, `text` or `itemId` | Puts a jewel in the socket. `text` adds the jewel to the build first. `itemId: 0` empties the socket. Cluster passives that sit at the same position stay allocated. |
+| `allocClusterNodes` | `socket`, `nodes?` | Allocates every passive the cluster jewel added, or only the listed names / ids. |
+| `whatIfJewel` | `socket`, `text` or `itemId`, `allocate?` (`"all"`), `stats?` | **Does not change the build.** Swaps the jewel into the socket on a copy of the tree, allocates its passives (`"all"`, `"none"`, or a list of names / ids) and returns the `diff`, `pointsUsed` and the added passives. Medium cluster jewels in its sockets stay in place. |
+
 ### Skills
 
 | Command | Args | Notes |
@@ -231,7 +243,7 @@ Path of Building is running with LiveBridge. The bridge folder is C:/pob-bridge.
 - To see my current build: read C:/pob-bridge/summary.txt (quick) or stats.json (full).
 - To act on it: `python C:/path/to/PathOfBuilding/tools/pob_bridge.py <command> key=value ...`
   (set POB_BRIDGE_DIR=C:/pob-bridge). Commands are documented in docs/live-bridge.md.
-- Always use whatIfNodes / whatIfItem to evaluate a change before applying it, and
+- Always use whatIfNodes / whatIfItem / whatIfJewel to evaluate a change before applying it, and
   tell me the expected DPS / EHP difference.
 - Never call importBuild, newBuild, openBuild or resetTree unless I ask; they replace my build.
 ```
@@ -245,6 +257,7 @@ Then you can ask things like:
 - "What's my weakest defensive layer right now?" The assistant reads `stats.json`.
 - "Find the three notables within 6 points that add the most DPS." It runs `findNodes`, then `whatIfNodes` for each candidate.
 - "Is this ring an upgrade?" (paste the item). It runs `whatIfItem`.
+- "Is this cluster jewel better than mine?" (paste the item). It runs `whatIfJewel`.
 - "Respec me out of Elemental Equilibrium and put the points into life." It runs `deallocNode`, `findNodes` and `allocNode`, and you watch the toasts as it works.
 
 ## Configuration
@@ -268,7 +281,8 @@ The Python client uses `POB_BRIDGE_DIR` too, or `--dir`.
 
 - Path of Exile 1 (Community fork) only.
 - `importCharacter` works only for public profiles (pathofexile.com → Privacy settings → "Hide characters" off). Like the website import in PoB, it cannot read bandit or pantheon choices, and the main skill is PoB's usual guess (the largest socket group), which may be a group with no active skill. Use `setMainSkill` afterwards.
-- Jewel sockets, cluster jewels, timeless jewel conversions and tattoos are not yet editable through commands. Their effects are still included in every stat.
+- Timeless jewel conversions and tattoos are not yet editable through commands. Their effects are still included in every stat.
+- `whatIfJewel` compares against the passive points it reports in `pointsUsed`; it does not take points back elsewhere in the tree. A swap that needs more points than you have still shows the stats, so check `pointsUsed`.
 - Undo history: commands record undo states, so Ctrl+Z works per tab as usual. There is no single undo for a whole command sequence. Use `exportCode` before experimenting and `importBuild` to roll back.
 - One PoB instance per bridge folder. PoB itself only allows one instance at a time.
 - **Background use (Windows).** The PoB runtime normally skips frames while its window is unfocused, which would stall the command queue. The bridge keeps PoB processing commands in the background (covered, minimized, or behind a fullscreen game), including when PoB starts in the background. While idle in the background it limits itself to about 10 frames per second, and to 4 per second after 3 seconds without commands, so the first command after a quiet period can take up to about 0.5 s. Set `POB_BRIDGE_BACKGROUND=0` to turn this off and get the runtime's default behaviour back; then keep PoB in the foreground while commands run. On other platforms PoB must stay in the foreground.
@@ -282,5 +296,6 @@ The Python client uses `POB_BRIDGE_DIR` too, or `--dir`.
 
 ## Changelog
 
+- **1.2.0** (2026-11-21): adds jewel and cluster jewel commands: `listJewelSockets`, `clusterNodes`, `socketJewel`, `allocClusterNodes` and `whatIfJewel`.
 - **1.1.0** (2026-11-15): adds `importCharacter` (import from a public pathofexile.com profile with no popups) and support for asynchronous commands.
 - **1.0.0** (2026-11-14): first release. Adds state export, 36 commands, what-if previews, activity toasts, the Python client and the self-test.
