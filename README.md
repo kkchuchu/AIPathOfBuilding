@@ -1,35 +1,76 @@
-# Path of Building + LiveBridge
+# Path of Building MCP
 
-> **This is a fork of [Path of Building Community](https://github.com/PathOfBuildingCommunity/PathOfBuilding) that adds _LiveBridge_.** With LiveBridge, scripts and AI assistants can see and edit the build you have open in PoB.
+> **Let Claude and other AI assistants read and edit the build you have open in Path of Building.**
+> This is a fork of [Path of Building Community](https://github.com/PathOfBuildingCommunity/PathOfBuilding) (Path of Exile 1) that adds an **MCP server**. MCP (Model Context Protocol) is the standard way AI apps such as Claude Desktop, Claude Code, Cursor and VS Code connect to tools.
 
 ![LiveBridge demo: a script builds an Elementalist while PoB recalculates live](docs/live-bridge/demo.gif)
 
 <sub>[Full-quality video (MP4)](docs/live-bridge/demo.mp4)</sub>
 
+### What you can ask
+
+- "My build keeps dying. What's my weakest defensive layer, and which notables within 6 points fix it?"
+- "Is this ring an upgrade?" (paste the item from the game)
+- "Is this cluster jewel better than mine?"
+- "Respec me out of Elemental Equilibrium and put the points into life."
+
+The assistant reads your live stats, previews changes with `whatIfNodes` / `whatIfItem` / `whatIfJewel` (these never touch your build), applies the ones you agree to, and every change shows up as a toast inside PoB.
+
 ### Watch Claude use it
 
-A fresh Claude Code session is asked *"my build keeps dying, fix it"*. It reads the live stats, previews six defensive notables with `whatIfNodes`, applies them, and reports the result. On this demo character, life went up 45% and EHP almost doubled, with DPS unchanged.
+A fresh Claude Code session is asked *"my build keeps dying, fix it"*. It reads the live stats, previews six defensive notables, applies them, and reports the result. On this demo character, life went up 45% and EHP almost doubled, with DPS unchanged.
 
-[![Claude Code driving Path of Building through LiveBridge](docs/live-bridge/claude-demo-poster.jpg)](docs/live-bridge/claude-demo.mp4)
+[![Claude Code driving Path of Building](docs/live-bridge/claude-demo-poster.jpg)](docs/live-bridge/claude-demo.mp4)
 
 <sub>Click the image to watch the 38-second video (MP4).</sub>
 
-### What LiveBridge adds
+## How it works
 
-- **Live state export.** Whenever your build changes, PoB writes `build.xml`, `stats.json` (every calculated stat) and `summary.txt` to a folder.
-- **Remote control.** Drop a JSON command in that folder and PoB runs it. There are 36 commands: allocate passives and masteries, add items, gems and skill groups, set the level, class, ascendancy and Configuration options, import or export builds, and more.
-- **Previews without changes.** `whatIfNodes` and `whatIfItem` return before/after numbers for any stat and leave the build untouched.
-- **Watch it work.** Each command shows a toast inside PoB with the resulting DPS, life and EHP changes.
-- **No dependencies.** It works through files only, with no network ports. The Python client uses only the standard library.
+```
+ Claude Desktop / Claude Code        pob-mcp                    Path of Building
+ (MCP client)          ── stdio ──▶  (MCP server)  ── files ──▶  (LiveBridge module)
+                       ◀── MCP ───                 ◀─────────    commands/ responses/
+                                                                 build.xml stats.json
+```
+
+- **LiveBridge** (inside PoB) exports the open build (`build.xml`, `stats.json` with every calculated stat, `summary.txt`) to a folder whenever it changes, and runs JSON commands dropped into that folder.
+- **pob-mcp** is the MCP server. Your AI app starts it automatically; it turns the 41 LiveBridge commands into MCP tools and the exported files into MCP resources (`pob://build/summary`, `pob://build/stats`, `pob://build/xml`). Tools are marked read-only or destructive, so apps can ask before anything replaces your build.
+- Everything stays on your PC: the bridge works through files only and opens no network ports.
+
+## Quick start
+
+1. **Run PoB from this repository** (see [CONTRIBUTING.md](CONTRIBUTING.md#setting-up-a-development-installation)). To choose the bridge folder, set `POB_BRIDGE_DIR` first:
+
+   ```powershell
+   $env:POB_BRIDGE_DIR = "C:\pob-bridge"
+   & ".\runtime\Path{space}of{space}Building.exe"
+   ```
+
+2. **Add the MCP server to your AI app.** Pick one:
+
+   | You use | Do this |
+   |---|---|
+   | **Claude Desktop** | Double-click `pob-mcp.mcpb` and choose your bridge folder. No Python needed. |
+   | **Claude Code**, no Python | `claude mcp add pob -e POB_BRIDGE_DIR=C:/pob-bridge -- C:/path/to/pob-mcp.exe` |
+   | **Claude Code**, with Python 3.8+ | `claude mcp add pob -e POB_BRIDGE_DIR=C:/pob-bridge -- python C:/path/to/PathOfBuilding/tools/pob_mcp.py` |
+   | **Other MCP apps** (Cursor, VS Code, ...) | Add a stdio server with command `pob-mcp.exe` (or `python tools/pob_mcp.py`) and env `POB_BRIDGE_DIR`. |
+
+   Download `pob-mcp.exe` and `pob-mcp.mcpb` from [Releases](https://github.com/kkchuchu/AIPathOfBuilding/releases), or build them yourself with `python tools/build_pob_mcp.py` (needs PyInstaller and Node.js on the build machine only). The Python server itself uses only the standard library.
+
+3. **Ask about your build.** Start a new chat and try "what's my DPS and what's my weakest resistance?"
+
+### Without MCP
+
+Scripts and assistants that can run shell commands can use the bridge directly with the bundled client:
 
 ```bash
 python tools/pob_bridge.py whatIfNodes '{"add": ["Heart of Thunder"]}'
 # -> CombinedDPS 1,246 -> 2,652 (+112.8%)
 ```
 
-**[Read the LiveBridge documentation →](docs/live-bridge.md)**
+**[Full LiveBridge and MCP documentation →](docs/live-bridge.md)**
 
-LiveBridge is an unofficial community project. It is not affiliated with or endorsed by Grinding Gear Games or the Path of Building Community team. Everything below this line is the original Path of Building README.
+This project is unofficial. It is not affiliated with or endorsed by Grinding Gear Games or the Path of Building Community team. Everything below this line is the original Path of Building README.
 
 ---
 

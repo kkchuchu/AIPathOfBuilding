@@ -49,3 +49,6 @@ runtime/SimpleGraphic/Screenshots
 # LiveBridge (default bridge folder in dev mode)
 src/LiveBridge/
 __pycache__/
+
+# pob-mcp build output (tools/build_pob_mcp.py)
+/build/
