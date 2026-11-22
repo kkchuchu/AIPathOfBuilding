@@ -1,4 +1,4 @@
-# LiveBridge: drive Path of Building from scripts and AI assistants
+# LiveBridge and MCP: drive Path of Building from AI assistants and scripts
 
 LiveBridge connects Path of Building to other programs through a folder on disk.
 Scripts, bots and AI coding assistants such as Claude Code can use it to:
@@ -235,7 +235,28 @@ Slot names follow PoB: `Weapon 1`, `Weapon 2`, `Helmet`, `Body Armour`, `Gloves`
 
 ## Using it with an AI assistant
 
-AI assistants that can run shell commands, such as Claude Code, Codex CLI or Cursor, need no extra code. Point the assistant at the bridge folder and the client. For example, put this in your project's `CLAUDE.md` or `AGENTS.md`:
+### MCP server (recommended)
+
+[`tools/pob_mcp.py`](../tools/pob_mcp.py) is an MCP (Model Context Protocol) server, so any MCP app (Claude Desktop, Claude Code, Cursor, VS Code, ...) can use the bridge with no prompt setup. It speaks MCP over stdio and uses only the Python standard library.
+
+- **Tools**: every command in the [command reference](#command-reference), with the same names and arguments (`save` included). Each tool carries MCP annotations: preview and read commands are `readOnlyHint`, and commands that replace or wipe the build (`openBuild`, `newBuild`, `importBuild`, `importCharacter`, `setClass`, `resetTree`, `importTreeUrl`, `removeItem`, `removeSkillGroup`) are `destructiveHint`.
+- **Resources**: `pob://build/summary`, `pob://build/stats` and `pob://build/xml`, the three exported files.
+- **Instructions**: the server tells the assistant to preview with the `whatIf*` commands before changing anything and never to replace the build unless asked.
+- The bridge folder comes from `--dir`, then `POB_BRIDGE_DIR`, then the default location.
+
+| App | Setup |
+|---|---|
+| Claude Desktop | Install `pob-mcp.mcpb` (double-click) and choose the bridge folder. |
+| Claude Code | `claude mcp add pob -e POB_BRIDGE_DIR=C:/pob-bridge -- C:/path/to/pob-mcp.exe`, or `... -- python C:/path/to/tools/pob_mcp.py` |
+| Others | stdio server: command `pob-mcp.exe` or `python tools/pob_mcp.py`, env `POB_BRIDGE_DIR`. |
+
+`python tools/build_pob_mcp.py` builds the standalone `build/pob-mcp/pob-mcp.exe` (PyInstaller, so users need no Python) and `build/pob-mcp/pob-mcp.mcpb` (a Claude Desktop extension; packed and validated with `npx @anthropic-ai/mcpb`).
+
+If PoB is not running, a tool call fails after its timeout and the command is withdrawn from the queue, so it does not run later by surprise.
+
+### Shell client
+
+AI assistants that can run shell commands, such as Claude Code, Codex CLI or Cursor, can also use the bridge with no MCP setup. Point the assistant at the bridge folder and the client. For example, put this in your project's `CLAUDE.md` or `AGENTS.md`:
 
 ```markdown
 ## Path of Building

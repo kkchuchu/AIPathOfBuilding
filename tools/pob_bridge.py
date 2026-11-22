@@ -32,7 +32,8 @@ from pathlib import Path
 
 def default_bridge_dir() -> Path:
     env = os.environ.get("POB_BRIDGE_DIR")
-    if env:
+    # Ignore an unexpanded placeholder (e.g. an MCP bundle setting left blank)
+    if env and "${" not in env:
         return Path(env)
     candidates = [
         Path.home() / "Documents" / "Path of Building" / "LiveBridge",
@@ -70,8 +71,9 @@ class PoBBridge:
         cmd_id = f"{time.time_ns()}-{uuid.uuid4().hex[:8]}"
         payload = json.dumps({"id": cmd_id, "cmd": cmd, "args": args or {}}, ensure_ascii=False)
         tmp = commands / f"{cmd_id}.json.tmp"
+        command_file = commands / f"{cmd_id}.json"
         tmp.write_text(payload, encoding="utf-8")
-        tmp.replace(commands / f"{cmd_id}.json")
+        tmp.replace(command_file)
 
         response_file = responses / f"{cmd_id}.json"
         if timeout is None:
@@ -90,7 +92,21 @@ class PoBBridge:
                     pass
                 return data
             time.sleep(0.05)
-        raise BridgeError(f"Timed out waiting for a response to '{cmd}' (is the PoB window open?)")
+        # PoB deletes a command file when it picks it up. If ours is still there, PoB never saw it:
+        # withdraw it so it does not run by surprise the next time PoB starts.
+        try:
+            command_file.unlink()
+        except FileNotFoundError:
+            raise BridgeError(
+                f"'{cmd}' was picked up by PoB but no response arrived within {timeout:.0f}s; "
+                "it may still finish. Check the build before retrying."
+            ) from None
+        except OSError:
+            pass
+        raise BridgeError(
+            f"Path of Building did not pick up '{cmd}' within {timeout:.0f}s, so it was withdrawn. "
+            "Is PoB (LiveBridge) running with this bridge folder?"
+        )
 
     def call(self, cmd: str, **args):
         """Send a command and return its result, raising BridgeError on failure."""
