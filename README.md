@@ -55,7 +55,7 @@ A fresh Claude Code session is asked *"my build keeps dying, fix it"*. It reads 
    | **Claude Code**, with Python 3.8+ | `claude mcp add pob -e POB_BRIDGE_DIR=C:/pob-bridge -- python C:/path/to/PathOfBuilding/tools/pob_mcp.py` |
    | **Other MCP apps** (Cursor, VS Code, ...) | Add a stdio server with command `pob-mcp.exe` (or `python tools/pob_mcp.py`) and env `POB_BRIDGE_DIR`. |
 
-   Build `pob-mcp.exe` and `pob-mcp.mcpb` with `python tools/build_pob_mcp.py` (needs PyInstaller and Node.js on the build machine only). The Python server itself uses only the standard library.
+   Download `pob-mcp.exe` and `pob-mcp.mcpb` from [Releases](https://github.com/kkchuchu/AIPathOfBuilding/releases), or build them yourself with `python tools/build_pob_mcp.py` (needs PyInstaller and Node.js on the build machine only). The Python server itself uses only the standard library.
 
 3. **Ask about your build.** Start a new chat and try "what's my DPS and what's my weakest resistance?"
 
